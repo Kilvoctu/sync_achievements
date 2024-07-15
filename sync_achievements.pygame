@@ -1,0 +1,685 @@
+#!/usr/bin/env python
+###
+#
+# Autodetect RetroAchievements that failed to upload by comparing the 
+# cheevo screenshots with the unlocked achievements for the configured 
+# RetroAchievements account. Will fail if screenshots are disabled.
+#
+# This code is rather fragile. It's a barely refactored shell script 
+# shoved into a GUI, with and a bunch of assumptions on file and folder 
+# locations. It will probably break when used on anything but an 
+# RG(28/35/40)XX(+/SP/H/DS) running Batocera/Knulli, but there are a
+# bunch of overrides at the top of the file to hardcode your screenshot
+# path and/or RetroAchievement credentials.
+#
+# Copyright 2024 Louis van Harten
+#
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU Affero General Public License as
+# published by the Free Software Foundation, either version 3 of the
+# License, or (at your option) any later version.
+# 
+###
+
+USERNAME_OVERRIDE = 'ENTER_CREDENTIALS_HERE'
+PASSWORD_OVERRIDE = 'ENTER_CREDENTIALS_HERE'
+
+SCREENSHOTS_DIRECTORY = "/userdata/screenshots/"
+# batocera.conf is ignored if the overrides above are used
+BATOCERA_CONF_LOCATION = '/userdata/system/batocera.conf'
+
+import pygame
+import pygame.freetype
+import sys
+import requests
+import json
+import time 
+import os
+import subprocess
+
+ENABLE_DEBUG_STRING = True
+pygame.init()
+WINDOW_SURFACE = pygame.HWSURFACE | pygame.DOUBLEBUF
+FONT_SIZE = 40
+FONT = pygame.font.SysFont(None, FONT_SIZE)
+FONT_SMALL = pygame.font.SysFont(None, FONT_SIZE//2)
+TEXT_COLOR = 'black'
+TEXT_COLOR_ACTIVE = (50, 75, 100)
+TEXT_COLOR_UNLOCKED = (0, 100, 0)
+TEXT_COLOR_NOT_UPLOADED = 'red'
+TEXT_COLOR_LIGHT = (255, 255, 255)
+BANNER_COLOR = (50, 75, 100)
+HOVER_BG_COLOR = (170, 170, 170)
+BACKGROUND_COLOR = (190, 190, 190)
+FPS = 60
+SCREEN = pygame.display.set_mode((640, 480), WINDOW_SURFACE)
+CLOCK = pygame.time.Clock()
+ICON_CACHE_DIR = 'icon_cache'
+if not os.path.exists(ICON_CACHE_DIR):
+    os.makedirs(ICON_CACHE_DIR)
+
+class Icon:
+    def __init__(self, state, cheevo_id, locked):
+        self.cheevo_id = cheevo_id
+        self.locked = locked
+        self.state = state
+
+    def get(self):
+        return self.state.get_cheevo_icon(self.cheevo_id, self.locked)
+
+class Button:
+    def __init__(self, text, pos, fonts, base_color, hovering_color, hover_bg_color=None, lineheight=30, centered=True, icon=None, hoverbox=None):
+        self.text = text
+        self.pos = pos
+        self.fonts = [x for x in fonts]
+        self.base_color, self.hovering_color = base_color, hovering_color
+        self.hovered = False
+        if hover_bg_color is not None:
+            self.hover_bg_color = [x for x in hover_bg_color]
+        else:
+            self.hover_bg_color = None
+        self.lineheight = lineheight
+        self.color = self.base_color
+        self.centered = centered
+        self.rendered_lines = []
+        self.render_rects = []
+        self.icon = icon
+        self.iconwidth = 0 if self.icon is None else 70
+        self.hoverbox = hoverbox
+
+        self.update_text()
+
+    def update(self, screen):
+        if self.hovered:
+            if self.hover_bg_color is not None:
+                if self.hoverbox is None:
+                    ypos = self.pos[1] - 32 if self.centered else self.pos[1]
+                    pygame.draw.rect(screen, self.hover_bg_color, pygame.Rect((0, ypos), (640, 65)))
+                else:
+                    xpos = self.pos[0] + self.hoverbox[0]
+                    ypos = self.pos[1] + self.hoverbox[1]
+                    pygame.draw.rect(screen, self.hover_bg_color, pygame.Rect((xpos, ypos), self.hoverbox[2:]))
+
+        if self.icon is not None:
+            screen.blit(self.icon.get(), self.pos)
+        for i in range(len(self.rendered_lines)):
+            screen.blit(self.rendered_lines[i], self.render_rects[i])
+    
+    def set_hovering(self, is_hovered):
+        self.hovered = is_hovered
+        self.color = self.hovering_color if is_hovered else self.base_color
+        self.update_text()
+
+    def move(self, dx, dy):
+        self.pos = (self.pos[0] + dx, self.pos[1] + dy)
+        self.update_text()
+
+    def update_text(self):
+        self.textpos = (self.pos[0] + self.iconwidth, self.pos[1] + self.iconwidth // 6)
+        self.rendered_lines = []
+        self.render_rects = []
+        for i, line in enumerate(self.text):
+            rendered_text = self.fonts[i].render(line, True, self.color)
+            if self.centered:
+                rect = rendered_text.get_rect(center=(self.textpos[0], self.textpos[1] + i * self.lineheight))
+            else:
+                rect = rendered_text.get_rect(topleft=(self.textpos[0], self.textpos[1] + i * self.lineheight))
+            self.rendered_lines.append(rendered_text)
+            self.render_rects.append(rect)
+            
+
+def render_text(text, pos, font, color, centered=False):
+    rendered_text = font.render(text, True, color)
+    if centered:
+        rect = rendered_text.get_rect(center=pos)
+    else:
+        rect = rendered_text.get_rect(topleft=pos)
+    SCREEN.blit(rendered_text, rect)
+
+
+class ErrorScreen:
+    def __init__(self, state):
+        self.error_message = ['Error']
+        self.state = state
+
+    def handle_events(self):
+        for event in pygame.event.get():
+            if event.type == pygame.QUIT:
+                pygame.quit()
+                sys.exit()
+            if event.type == pygame.KEYDOWN:
+                if event.key in [pygame.K_RETURN, pygame.K_b]:
+                    pygame.quit()
+                    sys.exit()
+
+    def render(self):
+        for i, line in enumerate(self.error_message):
+            if len(line) > 0:
+                render_text(line, (15, 75+20*i), FONT_SMALL, TEXT_COLOR)
+
+        pygame.draw.rect(SCREEN, BANNER_COLOR, pygame.Rect((0, 0), (640, 50)))
+        pygame.draw.rect(SCREEN, BANNER_COLOR, pygame.Rect((0, 425), (640, 55)))
+        render_text("B to exit", (15, 455), FONT_SMALL, TEXT_COLOR_LIGHT)
+
+
+class MainMenu:
+    def __init__(self, state):
+        self.state = state
+        self.start_button = Button(["Synchronize Achievements"], (320, 200), [FONT], TEXT_COLOR, TEXT_COLOR_ACTIVE, hover_bg_color=HOVER_BG_COLOR)
+        self.exit_button = Button(["Exit"], (320, 270), [FONT], TEXT_COLOR, TEXT_COLOR_ACTIVE, hover_bg_color=HOVER_BG_COLOR)
+        self.selected_button = self.start_button
+
+    def handle_events(self):
+        for event in pygame.event.get():
+            if event.type == pygame.QUIT:
+                pygame.quit()
+                sys.exit()
+            if event.type == pygame.KEYDOWN:
+                if event.key == pygame.K_UP:
+                    self.selected_button = self.start_button
+                elif event.key == pygame.K_DOWN:
+                    self.selected_button = self.exit_button
+                elif event.key in [pygame.K_RETURN, pygame.K_a]:
+                    if self.selected_button == self.start_button:
+                        print(f'successfully uploaded achievements:')
+                        print(self.state.get_uploaded_achievements(force_reload=True))
+                        self.state.unmatched_achievements = [x for x in self.state.get_unlocked_achievements() if x not in self.state.get_uploaded_achievements()]
+                        self.state.current_state = "SYNC_CHEEVOS"
+                        return
+                    elif self.selected_button == self.exit_button:
+                        pygame.quit()
+                        sys.exit()
+
+    def render(self):
+        self.start_button.set_hovering(self.selected_button == self.start_button)
+        self.exit_button.set_hovering(self.selected_button == self.exit_button)
+
+        self.start_button.update(SCREEN)
+        self.exit_button.update(SCREEN)
+
+        pygame.draw.rect(SCREEN, BANNER_COLOR, pygame.Rect((0, 425), (640, 55)))
+        render_text("Use DPAD to navigate", (15, 435), FONT_SMALL, TEXT_COLOR_LIGHT)
+        render_text("A to select", (15, 455), FONT_SMALL, TEXT_COLOR_LIGHT)
+
+class ScrollCheevos:
+    def __init__(self, state):
+        self.state = state
+        self.scroll_y = 200
+        self.scroll_speed = 75 * len(self.state.get_unlocked_achievements()) // 100
+
+    def handle_events(self):
+        for event in pygame.event.get():
+            if event.type == pygame.QUIT:
+                pygame.quit()
+                sys.exit()
+            if event.type == pygame.KEYDOWN:
+                if event.key == pygame.K_b:
+                    self.state.current_state = "MAIN_MENU"
+                    return
+
+    def render(self):
+        self.scroll_y -= self.scroll_speed
+        y_offset = self.scroll_y
+
+        for achievement in self.state.get_unlocked_achievements():
+            if achievement in self.state.get_uploaded_achievements():
+                color = TEXT_COLOR_UNLOCKED
+                cheevostring = f'{achievement:07d}: {self.state.get_uploaded_achievements()[achievement]["Title"]} ({self.state.get_uploaded_achievements()[achievement]["GameTitle"]})'
+            else:
+                color = TEXT_COLOR_NOT_UPLOADED
+                cheevostring = f'!!!!!! {achievement:07d} !!!!!!'
+            if y_offset > FONT_SIZE + 10:
+                render_text(cheevostring, (10, y_offset), FONT_SMALL, color)
+            y_offset += FONT_SIZE // 2 + 1
+
+        pygame.draw.rect(SCREEN, BANNER_COLOR, pygame.Rect((0, 0), (640, 50)))
+        if y_offset < 440:
+            self.state.current_state = "SYNC_CHEEVOS"
+            render_text('Collecting achievement info...', (10, 10), FONT, TEXT_COLOR_LIGHT)
+        else:
+            render_text('Scanning saved achievements...', (10, 10), FONT, TEXT_COLOR_LIGHT)
+        pygame.draw.rect(SCREEN, BANNER_COLOR, pygame.Rect((0, 425), (640, 55)))
+
+
+class SyncAchievements:
+    def __init__(self, state):
+        self.state = state
+        self.scroll_y = 0
+        self.scroll_speed = 20
+        self.buttons = []
+        self.selected_button_index = 0
+        self.max_ypos = 370
+
+    def handle_events(self):
+        for event in pygame.event.get():
+            if event.type == pygame.QUIT:
+                pygame.quit()
+                sys.exit()
+            if event.type == pygame.KEYDOWN:
+                if event.key == pygame.K_b:
+                    self.state.current_state = "MAIN_MENU"
+                    return
+                elif event.key == pygame.K_UP:
+                    if self.selected_button_index > 0:
+                        self.selected_button_index = self.selected_button_index - 1
+                        self.scroll_y += 70
+                elif event.key == pygame.K_DOWN:
+                    if self.selected_button_index < len(self.buttons) - 1:
+                        self.selected_button_index = self.selected_button_index + 1
+                        self.scroll_y -= 70
+                elif event.key in [pygame.K_RETURN, pygame.K_a]:
+                    self.show_dialog(self.buttons[self.selected_button_index])
+
+    # Just hijack the loop. Should probably refactor to a new state, but this is easier.
+    def show_dialog(self, cheevo_button):
+        dialog_font = pygame.font.SysFont(None, FONT_SIZE)
+        cheevo_button.move(0, -50)
+
+        if cheevo_button.cheevo_id in self.state.newly_unlocked:
+            questiontext = "Unlock request already sent!"
+            yes_button = Button(["OK"], (320, 300), [dialog_font], TEXT_COLOR, TEXT_COLOR_ACTIVE, centered=True)
+            no_button = yes_button
+        else:
+            questiontext = "Send unlock request?"
+            yes_button = Button(["YES"], (270, 300), [dialog_font], TEXT_COLOR, TEXT_COLOR_ACTIVE, centered=True, hover_bg_color=HOVER_BG_COLOR, hoverbox=(-35,-20,70,40))
+            no_button = Button(["NO"], (360, 300), [dialog_font], TEXT_COLOR, TEXT_COLOR_ACTIVE, centered=True, hover_bg_color=HOVER_BG_COLOR, hoverbox=(-35,-20,70,40))
+        selected_dialog_button = yes_button
+
+        while True:
+            SCREEN.fill(BACKGROUND_COLOR)
+            render_text(questiontext, (320, 240), dialog_font, TEXT_COLOR, centered=True)
+
+            for event in pygame.event.get():
+                if event.type == pygame.QUIT:
+                    pygame.quit()
+                    sys.exit()
+                if event.type == pygame.KEYDOWN:
+                    if event.key == pygame.K_LEFT:
+                        selected_dialog_button = yes_button
+                    elif event.key == pygame.K_RIGHT:
+                        selected_dialog_button = no_button
+                    elif event.key in [pygame.K_RETURN, pygame.K_a]:
+                        if selected_dialog_button == no_button:
+                            cheevo_button.move(0, 50)
+                            return False
+                        elif selected_dialog_button == yes_button:
+                            questiontext = 'OK, synchronizing...'
+                            self.state.newly_unlocked.append(cheevo_button.cheevo_id)
+                            cheevo_button.update(SCREEN)
+                            pygame.display.update()
+
+                            self.state.send_unlock_request(cheevo_button.cheevo_id)
+                            return True
+                    elif event.key in [pygame.K_b, pygame.K_x]:
+                        cheevo_button.move(0, 50)
+                        return False
+
+            yes_button.set_hovering(selected_dialog_button == yes_button)
+            no_button.set_hovering(selected_dialog_button == no_button)
+
+            pygame.draw.rect(SCREEN, BANNER_COLOR, pygame.Rect((0, 425), (640, 55)))
+            render_text("Use DPAD to navigate", (15, 435), FONT_SMALL, TEXT_COLOR_LIGHT)
+            render_text("A to select, B to return", (15, 455), FONT_SMALL, TEXT_COLOR_LIGHT)
+            
+            cheevo_button.update(SCREEN)
+            yes_button.update(SCREEN)
+            no_button.update(SCREEN)
+
+            pygame.display.update()
+            CLOCK.tick(FPS)
+
+    def render(self):
+        SCREEN.fill(BACKGROUND_COLOR)
+        
+        if len(self.state.unmatched_achievements) > 0:
+            pygame.draw.rect(SCREEN, BANNER_COLOR, pygame.Rect((0, 0), (640, 50)))
+            render_text('Found missing achievements:', (10, 10), FONT, TEXT_COLOR_LIGHT)
+        else:
+            self.state.current_state = "LIST_CHEEVOS"
+
+        y_offset = 130 + self.scroll_y
+        self.buttons = []
+        for achievement in self.state.unmatched_achievements:
+            ach_title = self.state.get_unmatched_info(achievement)["Achievement"]["Title"]
+            game_title = self.state.get_unmatched_info(achievement)["Game"]["Title"]
+            button_text = [ach_title, game_title]
+            is_newly_unlocked = achievement in self.state.newly_unlocked
+            button_icon = Icon(self.state, achievement, locked=(not is_newly_unlocked))
+            text_color = TEXT_COLOR_UNLOCKED if is_newly_unlocked else TEXT_COLOR
+            highlight_color = TEXT_COLOR_UNLOCKED if is_newly_unlocked else TEXT_COLOR_ACTIVE
+            button = Button(button_text, (20, y_offset), [FONT, FONT_SMALL], text_color, highlight_color, centered=False, icon=button_icon, hover_bg_color=HOVER_BG_COLOR)
+            button.cheevo_id = achievement
+            self.buttons.append(button)
+            y_offset += 70
+            if y_offset >= self.max_ypos:
+                break
+
+        for i, button in enumerate(self.buttons):
+            button.set_hovering(i == self.selected_button_index)
+            if button.pos[1] > 55 and button.pos[1] < self.max_ypos:
+                button.update(SCREEN)
+
+        pygame.draw.rect(SCREEN, BANNER_COLOR, pygame.Rect((0, 425), (640, 55)))
+        render_text("Use DPAD to navigate", (15, 435), FONT_SMALL, TEXT_COLOR_LIGHT)
+        render_text("A to select, B to return", (15, 455), FONT_SMALL, TEXT_COLOR_LIGHT)
+
+
+class ListAchievements:
+    def __init__(self, state):
+        self.state = state
+        self.scroll_y = 0
+        self.scroll_speed = 20
+        self.buttons = []
+        self.selected_button_index = 0
+
+    def handle_events(self):
+        for event in pygame.event.get():
+            if event.type == pygame.QUIT:
+                pygame.quit()
+                sys.exit()
+            if event.type == pygame.KEYDOWN:
+                if event.key == pygame.K_b:
+                    self.state.current_state = "MAIN_MENU"
+                    return
+                elif event.key == pygame.K_UP:
+                    if self.selected_button_index > 0:
+                        self.selected_button_index = self.selected_button_index - 1
+                        self.scroll_y += 70
+                elif event.key == pygame.K_DOWN:
+                    if self.selected_button_index < len(self.buttons) - 1:
+                        self.selected_button_index = self.selected_button_index + 1
+                        self.scroll_y -= 70
+                elif event.key == pygame.K_LEFT:
+                    for i in range(4):
+                        if self.selected_button_index > 0:
+                            self.selected_button_index = self.selected_button_index - 1
+                            self.scroll_y += 70
+                elif event.key == pygame.K_RIGHT:
+                    for i in range(4):
+                        if self.selected_button_index < len(self.buttons) - 1:
+                            self.selected_button_index = self.selected_button_index + 1
+                            self.scroll_y -= 70
+                elif event.key == pygame.K_l:
+                    for i in range(100):
+                        if self.selected_button_index > 0:
+                            self.selected_button_index = self.selected_button_index - 1
+                            self.scroll_y += 70
+                elif event.key == pygame.K_r:
+                    for i in range(100):
+                        if self.selected_button_index < len(self.state.get_uploaded_achievements()) - 1:
+                            self.selected_button_index = self.selected_button_index + 1
+                            self.scroll_y -= 70
+
+    def render(self):
+        SCREEN.fill(BACKGROUND_COLOR)
+        
+        pygame.draw.rect(SCREEN, BANNER_COLOR, pygame.Rect((0, 0), (640, 50)))
+        render_text('All achievements synchronized', (10, 10), FONT, TEXT_COLOR_LIGHT)
+
+        y_offset = 130 + self.scroll_y
+        self.buttons = []
+        for achievement in self.state.get_uploaded_achievements():
+            ach_title = self.state.get_uploaded_achievements()[achievement]["Title"]
+            game_title = self.state.get_uploaded_achievements()[achievement]["GameTitle"]
+            button_text = [ach_title, game_title]
+            button_icon = Icon(self.state, achievement, locked=False)
+            text_color = TEXT_COLOR_UNLOCKED
+            highlight_color = TEXT_COLOR_UNLOCKED
+            button = Button(button_text, (20, y_offset), [FONT, FONT_SMALL], text_color, highlight_color, centered=False, icon=button_icon, hover_bg_color=HOVER_BG_COLOR)
+            button.cheevo_id = achievement
+            self.buttons.append(button)
+            y_offset += 70
+            if y_offset > 480:
+                break
+
+        for i, button in enumerate(self.buttons):
+            button.set_hovering(i == self.selected_button_index)
+            if button.pos[1] > 55 and button.pos[1] < 370:
+                button.update(SCREEN)
+
+        pygame.draw.rect(SCREEN, BANNER_COLOR, pygame.Rect((0, 425), (640, 55)))
+        render_text(f"{self.selected_button_index+1}/{len(self.state.get_uploaded_achievements())}", (320, 450), FONT, TEXT_COLOR_LIGHT, centered=True)
+
+        render_text("Use DPAD to navigate", (15, 435), FONT_SMALL, TEXT_COLOR_LIGHT)
+        render_text("B to return", (15, 455), FONT_SMALL, TEXT_COLOR_LIGHT)
+
+
+class GlobalState:
+    def __init__(self):
+        self.current_state = "SCROLL_CHEEVOS" 
+        self.cheevos_token = None
+        self.key_states = {
+            pygame.K_UP: False,
+            pygame.K_DOWN: False
+        }
+        self.icon_cache = {}
+        self.icon_cache_locked = {}
+        self.newly_unlocked = []
+        self.unlocked_achievements = None
+        self.uploaded_achievements = None
+        self.unmatched_dict = {}
+        self.game_dict_cache = {}
+        self.debug_string = 'Logging in...'
+        self.username = None 
+        self.password = None 
+
+        # API key. Use your own for fewer dropped network requests (can be found in 
+        # retroachievements.org/controlpanel.php, look for 'Web API Key')
+        self.api_key = 'o9RmEVAVdegyNMJm5eHr3w1qWpao6xFW'
+        # replace with your own username if using your own API key
+        self.api_username = 'ijustneedanapikey'
+
+        self.states = {}
+        self.states["ERROR"] = ErrorScreen(self)
+        self.states["MAIN_MENU"] = MainMenu(self)
+        self.states["SCROLL_CHEEVOS"] = ScrollCheevos(self)
+        self.states["SYNC_CHEEVOS"] = SyncAchievements(self)
+        self.states["LIST_CHEEVOS"] = ListAchievements(self)
+
+    def print_error(self, msg):
+        print(msg)
+        if type(msg) not in [list, tuple]:
+            msg = [msg]
+        self.states["ERROR"].error_message = msg
+        self.current_state = "ERROR"
+
+    def get_unmatched_info(self, cheevo_id):
+        if cheevo_id not in self.unmatched_dict:
+            self.unmatched_dict[cheevo_id] = self.get_cheevo_dict(cheevo_id)
+
+        return self.unmatched_dict[cheevo_id]
+
+    def get_username(self):
+        if USERNAME_OVERRIDE != 'ENTER_CREDENTIALS_HERE':
+            self.username = USERNAME_OVERRIDE
+        if self.username is None:
+            try:
+                with open(BATOCERA_CONF_LOCATION) as f:
+                    for line in f:
+                        if line.startswith('global.retroachievements.username'):
+                            self.username = line.split('=')[1].strip()
+            except:
+                self.print_error(['Could not find retroachievements username in',
+                    BATOCERA_CONF_LOCATION,
+                    'either add it to the config file or hardcode it at the top of this script.'])
+        return self.username
+
+    def get_password(self):
+        if PASSWORD_OVERRIDE != 'ENTER_CREDENTIALS_HERE':
+            self.password = PASSWORD_OVERRIDE
+        if self.password is None:
+            try:
+                with open(BATOCERA_CONF_LOCATION) as f:
+                    for line in f:
+                        if line.startswith('global.retroachievements.password'):
+                            self.password = line.split('=')[1].strip()
+            except:
+                self.print_error(['Could not find retroachievements password in',
+                    BATOCERA_CONF_LOCATION,
+                    'either add it to the config file or hardcode it at the top of this script.'])
+        return self.password
+
+    def get_badgenum_from_cid(self, cheevo_id):
+        if cheevo_id in self.get_uploaded_achievements():
+            cheevo_badge = self.get_uploaded_achievements()[cheevo_id]["BadgeURL"].split('/')[-1].split('.')[-2]
+        else:
+            ach_title = self.get_unmatched_info(cheevo_id)["Achievement"]["Title"]
+            game_title = self.get_unmatched_info(cheevo_id)["Game"]["Title"]
+            game_id = self.get_unmatched_info(cheevo_id)["Game"]["ID"]
+            game_dict = self.get_game_dict(game_id)
+            cheevo_badge = game_dict['Achievements'][str(cheevo_id)]['BadgeName']
+
+        return cheevo_badge
+
+    def get_cheevo_icon(self, cheevo_id, locked=True):
+        icon_cache = self.icon_cache_locked if locked else self.icon_cache
+        cheevo_id = int(cheevo_id)
+        if cheevo_id in icon_cache:
+            return icon_cache[cheevo_id]
+
+        cheevo_badge = self.get_badgenum_from_cid(cheevo_id)
+
+        fname = f'{cheevo_badge}_lock.png' if locked else f'{cheevo_badge}.png'
+        icon_path = os.path.join(ICON_CACHE_DIR, fname)
+
+        ICON_URL = f'https://media.retroachievements.org/Badge/{fname}'
+        if os.path.exists(icon_path):
+            try:
+                icon_cache[cheevo_id] = pygame.image.load(icon_path)
+            except:
+                os.remove(icon_path)
+
+        if not os.path.exists(icon_path):
+            response = requests.get(ICON_URL)
+            if response.status_code == 200:
+                with open(icon_path, 'wb') as file:
+                    file.write(response.content)
+                icon_cache[cheevo_id] = pygame.image.load(icon_path)
+            else:
+                icon_cache[cheevo_id] = None
+        return icon_cache[cheevo_id]
+
+    def get_unlocked_achievements(self):
+        if self.unlocked_achievements is None:
+            self.unlocked_achievements = []
+            target_dir = SCREENSHOTS_DIRECTORY
+            target_string = "cheevo-"
+            target_extension = ".png"
+
+            try:
+                entries = os.listdir(target_dir)
+            except OSError as e:
+                self.print_error(['Error loading screenshot directory', target_dir, f'Error: {e}',
+                    'To use a different screenshot directory, change the location at the top of this file.'])
+                return []
+
+            for entry in entries:
+                if target_string in entry and entry.endswith(target_extension):
+                    start_index = entry.index(target_string) + len(target_string)
+                    end_index = entry.index(target_extension)
+                    cheevo_number = int(entry[start_index:end_index])
+                    self.unlocked_achievements.append(cheevo_number)
+                    print(cheevo_number)
+
+        return self.unlocked_achievements
+
+    def get_game_dict(self, game_id):
+        if game_id not in self.game_dict_cache:
+            url = f'https://retroachievements.org/API/API_GetGameExtended.php'
+            params = {'z': self.api_username, 'i': game_id, 'y': self.api_key}
+            response = requests.get(url, params=params)
+            print(response.text)
+            game_dict = json.loads(response.text)
+            self.game_dict_cache[game_id] = game_dict
+
+        return self.game_dict_cache[game_id]
+
+    def get_cheevo_dict(self, cheevo_id):
+        url = f'https://retroachievements.org/API/API_GetAchievementUnlocks.php'
+        params = {'z': self.api_username, 'c': 0, 'a': cheevo_id, 'y': self.api_key}
+        response = requests.get(url, params=params)
+        achievement = json.loads(response.text)
+        print(response.text)
+        return achievement
+
+    def send_unlock_request(self, cheevo_id):
+        url = 'https://retroachievements.org/dorequest.php'
+        params = {'u': self.get_username(), 'r': 'awardachievement', 
+                'a': cheevo_id, 't': self.get_token(), 'h': 0}
+        mheaders = {'User-Agent': '1.2.0'}
+        response = requests.get(url, headers=mheaders, params=params)
+        print(response.text)
+
+    def get_uploaded_achievements(self, force_reload=False):
+        if self.uploaded_achievements is None or force_reload:
+            url = f'https://retroachievements.org/API/API_GetUserRecentAchievements.php'
+            params = {'u': self.get_username(), 'z': self.api_username,
+                    'y': self.api_key, 'm': 10000000}
+            response = requests.get(url, params=params)
+            print(response.text)
+            achievements = json.loads(response.text)
+            cheevo_ids = [x['AchievementID'] for x in achievements]
+            cheevo_dict = {}
+            for i, cid in enumerate(cheevo_ids):
+                cheevo_dict[cid] = achievements[i]
+            self.uploaded_achievements = cheevo_dict
+
+        return self.uploaded_achievements
+
+    def get_token(self):
+        if self.cheevos_token is None:
+            try:
+                url = 'https://retroachievements.org/dorequest.php?r=login'
+                params = {'u': self.get_username(), 'p': self.get_password()}
+                mheaders = {'User-Agent': '1.2.0'}
+                response = requests.post(url, headers=mheaders, json=params)
+                login = json.loads(response.text)
+                print(response.text)
+                self.cheevos_token = login["Token"]
+                if login["Success"]:
+                    self.debug_string = f'Login successful'
+                else:
+                    self.debug_string = f'Login error'
+            except:
+                self.print_error(['Failed RetroAchievements login!', '',
+                    f'username | password used: {self.get_username()} | {self.get_password()}',
+                    'Check you credentials in batocera.conf, or enter them manually in this file.'])
+                self.debug_string = f'Login error'
+        return self.cheevos_token
+
+
+def render_startscreen(state):
+    SCREEN.fill(BACKGROUND_COLOR)
+    pygame.draw.rect(SCREEN, BANNER_COLOR, pygame.Rect((0, 0), (640, 50)))
+    pygame.draw.rect(SCREEN, BANNER_COLOR, pygame.Rect((0, 425), (640, 55)))
+    render_text('Trying to log in...', (10, 10), FONT, TEXT_COLOR_LIGHT)
+    pygame.display.update()
+
+
+def main():
+    # I should probably refactor this properly, but this is quicker/easier.
+    state = GlobalState()
+
+    render_startscreen(state)
+    # check if we can login
+    print(state.get_token())
+
+    state.unmatched_achievements = [x for x in state.get_unlocked_achievements() if x not in state.get_uploaded_achievements()]
+
+    while True:
+        SCREEN.fill(BACKGROUND_COLOR)
+
+        state.states[state.current_state].handle_events()
+        state.states[state.current_state].render()
+
+        if ENABLE_DEBUG_STRING:
+            if len(state.debug_string) > 0:
+                rendered_text = FONT_SMALL.render(state.debug_string, True, TEXT_COLOR_LIGHT)
+                rect = rendered_text.get_rect(topright=(625, 455))
+                SCREEN.blit(rendered_text, rect)
+
+        pygame.display.update()
+        CLOCK.tick(FPS)
+
+if __name__ == "__main__":
+    main()
