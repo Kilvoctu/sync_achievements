@@ -33,7 +33,7 @@ import pygame.freetype
 import sys
 import requests
 import json
-import time 
+import time
 import os
 import subprocess
 
@@ -42,7 +42,7 @@ pygame.init()
 WINDOW_SURFACE = pygame.HWSURFACE | pygame.DOUBLEBUF
 FONT_SIZE = 40
 FONT = pygame.font.SysFont(None, FONT_SIZE)
-FONT_SMALL = pygame.font.SysFont(None, FONT_SIZE//2)
+FONT_SMALL = pygame.font.SysFont(None, FONT_SIZE // 2)
 TEXT_COLOR = 'black'
 TEXT_COLOR_ACTIVE = (50, 75, 100)
 TEXT_COLOR_UNLOCKED = (0, 100, 0)
@@ -58,6 +58,7 @@ ICON_CACHE_DIR = 'icon_cache'
 if not os.path.exists(ICON_CACHE_DIR):
     os.makedirs(ICON_CACHE_DIR)
 
+
 class Icon:
     def __init__(self, state, cheevo_id, locked):
         self.cheevo_id = cheevo_id
@@ -67,8 +68,10 @@ class Icon:
     def get(self):
         return self.state.get_cheevo_icon(self.cheevo_id, self.locked)
 
+
 class Button:
-    def __init__(self, text, pos, fonts, base_color, hovering_color, hover_bg_color=None, lineheight=30, centered=True, icon=None, hoverbox=None):
+    def __init__(self, text, pos, fonts, base_color, hovering_color, hover_bg_color=None, lineheight=30, centered=True,
+                 icon=None, hoverbox=None):
         self.text = text
         self.pos = pos
         self.fonts = [x for x in fonts]
@@ -85,6 +88,7 @@ class Button:
         self.render_rects = []
         self.icon = icon
         self.iconwidth = 0 if self.icon is None else 70
+        self.textpos = (self.pos[0] + self.iconwidth, self.pos[1] + self.iconwidth // 6)
         self.hoverbox = hoverbox
 
         self.update_text()
@@ -104,7 +108,7 @@ class Button:
             screen.blit(self.icon.get(), self.pos)
         for i in range(len(self.rendered_lines)):
             screen.blit(self.rendered_lines[i], self.render_rects[i])
-    
+
     def set_hovering(self, is_hovered):
         self.hovered = is_hovered
         self.color = self.hovering_color if is_hovered else self.base_color
@@ -112,10 +116,10 @@ class Button:
 
     def move(self, dx, dy):
         self.pos = (self.pos[0] + dx, self.pos[1] + dy)
+        self.textpos = (self.pos[0] + self.iconwidth, self.pos[1] + self.iconwidth // 6)
         self.update_text()
 
     def update_text(self):
-        self.textpos = (self.pos[0] + self.iconwidth, self.pos[1] + self.iconwidth // 6)
         self.rendered_lines = []
         self.render_rects = []
         for i, line in enumerate(self.text):
@@ -126,7 +130,7 @@ class Button:
                 rect = rendered_text.get_rect(topleft=(self.textpos[0], self.textpos[1] + i * self.lineheight))
             self.rendered_lines.append(rendered_text)
             self.render_rects.append(rect)
-            
+
 
 def render_text(text, pos, font, color, centered=False):
     rendered_text = font.render(text, True, color)
@@ -155,7 +159,7 @@ class ErrorScreen:
     def render(self):
         for i, line in enumerate(self.error_message):
             if len(line) > 0:
-                render_text(line, (15, 75+20*i), FONT_SMALL, TEXT_COLOR)
+                render_text(line, (15, 75 + 20 * i), FONT_SMALL, TEXT_COLOR)
 
         pygame.draw.rect(SCREEN, BANNER_COLOR, pygame.Rect((0, 0), (640, 50)))
         pygame.draw.rect(SCREEN, BANNER_COLOR, pygame.Rect((0, 425), (640, 55)))
@@ -165,8 +169,10 @@ class ErrorScreen:
 class MainMenu:
     def __init__(self, state):
         self.state = state
-        self.start_button = Button(["Synchronize Achievements"], (320, 200), [FONT], TEXT_COLOR, TEXT_COLOR_ACTIVE, hover_bg_color=HOVER_BG_COLOR)
-        self.exit_button = Button(["Exit"], (320, 270), [FONT], TEXT_COLOR, TEXT_COLOR_ACTIVE, hover_bg_color=HOVER_BG_COLOR)
+        self.start_button = Button(["Synchronize Achievements"], (320, 200),
+                                   [FONT], TEXT_COLOR, TEXT_COLOR_ACTIVE, hover_bg_color=HOVER_BG_COLOR)
+        self.exit_button = Button(["Exit"], (320, 270),
+                                  [FONT], TEXT_COLOR, TEXT_COLOR_ACTIVE, hover_bg_color=HOVER_BG_COLOR)
         self.selected_button = self.start_button
 
     def handle_events(self):
@@ -183,7 +189,8 @@ class MainMenu:
                     if self.selected_button == self.start_button:
                         print(f'successfully uploaded achievements:')
                         print(self.state.get_uploaded_achievements(force_reload=True))
-                        self.state.unmatched_achievements = [x for x in self.state.get_unlocked_achievements() if x not in self.state.get_uploaded_achievements()]
+                        self.state.unmatched_achievements = [x for x in self.state.get_unlocked_achievements() if
+                                                             x not in self.state.get_uploaded_achievements()]
                         self.state.current_state = "SYNC_CHEEVOS"
                         return
                     elif self.selected_button == self.exit_button:
@@ -200,6 +207,7 @@ class MainMenu:
         pygame.draw.rect(SCREEN, BANNER_COLOR, pygame.Rect((0, 425), (640, 55)))
         render_text("Use DPAD to navigate", (15, 435), FONT_SMALL, TEXT_COLOR_LIGHT)
         render_text("A to select", (15, 455), FONT_SMALL, TEXT_COLOR_LIGHT)
+
 
 class ScrollCheevos:
     def __init__(self, state):
@@ -224,7 +232,8 @@ class ScrollCheevos:
         for achievement in self.state.get_unlocked_achievements():
             if achievement in self.state.get_uploaded_achievements():
                 color = TEXT_COLOR_UNLOCKED
-                cheevostring = f'{achievement:07d}: {self.state.get_uploaded_achievements()[achievement]["Title"]} ({self.state.get_uploaded_achievements()[achievement]["GameTitle"]})'
+                cheevostring = (f'{achievement:07d}: {self.state.get_uploaded_achievements()[achievement]["Title"]}' +
+                                f' ({self.state.get_uploaded_achievements()[achievement]["GameTitle"]})')
             else:
                 color = TEXT_COLOR_NOT_UPLOADED
                 cheevostring = f'!!!!!! {achievement:07d} !!!!!!'
@@ -281,8 +290,10 @@ class SyncAchievements:
             no_button = yes_button
         else:
             questiontext = "Send unlock request?"
-            yes_button = Button(["YES"], (270, 300), [dialog_font], TEXT_COLOR, TEXT_COLOR_ACTIVE, centered=True, hover_bg_color=HOVER_BG_COLOR, hoverbox=(-35,-20,70,40))
-            no_button = Button(["NO"], (360, 300), [dialog_font], TEXT_COLOR, TEXT_COLOR_ACTIVE, centered=True, hover_bg_color=HOVER_BG_COLOR, hoverbox=(-35,-20,70,40))
+            yes_button = Button(["YES"], (270, 300), [dialog_font], TEXT_COLOR, TEXT_COLOR_ACTIVE, centered=True,
+                                hover_bg_color=HOVER_BG_COLOR, hoverbox=(-35, -20, 70, 40))
+            no_button = Button(["NO"], (360, 300), [dialog_font], TEXT_COLOR, TEXT_COLOR_ACTIVE, centered=True,
+                               hover_bg_color=HOVER_BG_COLOR, hoverbox=(-35, -20, 70, 40))
         selected_dialog_button = yes_button
 
         while True:
@@ -320,7 +331,7 @@ class SyncAchievements:
             pygame.draw.rect(SCREEN, BANNER_COLOR, pygame.Rect((0, 425), (640, 55)))
             render_text("Use DPAD to navigate", (15, 435), FONT_SMALL, TEXT_COLOR_LIGHT)
             render_text("A to select, B to return", (15, 455), FONT_SMALL, TEXT_COLOR_LIGHT)
-            
+
             cheevo_button.update(SCREEN)
             yes_button.update(SCREEN)
             no_button.update(SCREEN)
@@ -330,7 +341,7 @@ class SyncAchievements:
 
     def render(self):
         SCREEN.fill(BACKGROUND_COLOR)
-        
+
         if len(self.state.unmatched_achievements) > 0:
             pygame.draw.rect(SCREEN, BANNER_COLOR, pygame.Rect((0, 0), (640, 50)))
             render_text('Found missing achievements:', (10, 10), FONT, TEXT_COLOR_LIGHT)
@@ -347,7 +358,8 @@ class SyncAchievements:
             button_icon = Icon(self.state, achievement, locked=(not is_newly_unlocked))
             text_color = TEXT_COLOR_UNLOCKED if is_newly_unlocked else TEXT_COLOR
             highlight_color = TEXT_COLOR_UNLOCKED if is_newly_unlocked else TEXT_COLOR_ACTIVE
-            button = Button(button_text, (20, y_offset), [FONT, FONT_SMALL], text_color, highlight_color, centered=False, icon=button_icon, hover_bg_color=HOVER_BG_COLOR)
+            button = Button(button_text, (20, y_offset), [FONT, FONT_SMALL], text_color, highlight_color,
+                            centered=False, icon=button_icon, hover_bg_color=HOVER_BG_COLOR)
             button.cheevo_id = achievement
             self.buttons.append(button)
             y_offset += 70
@@ -412,7 +424,7 @@ class ListAchievements:
 
     def render(self):
         SCREEN.fill(BACKGROUND_COLOR)
-        
+
         pygame.draw.rect(SCREEN, BANNER_COLOR, pygame.Rect((0, 0), (640, 50)))
         render_text('All achievements synchronized', (10, 10), FONT, TEXT_COLOR_LIGHT)
 
@@ -425,7 +437,8 @@ class ListAchievements:
             button_icon = Icon(self.state, achievement, locked=False)
             text_color = TEXT_COLOR_UNLOCKED
             highlight_color = TEXT_COLOR_UNLOCKED
-            button = Button(button_text, (20, y_offset), [FONT, FONT_SMALL], text_color, highlight_color, centered=False, icon=button_icon, hover_bg_color=HOVER_BG_COLOR)
+            button = Button(button_text, (20, y_offset), [FONT, FONT_SMALL], text_color, highlight_color,
+                            centered=False, icon=button_icon, hover_bg_color=HOVER_BG_COLOR)
             button.cheevo_id = achievement
             self.buttons.append(button)
             y_offset += 70
@@ -438,7 +451,8 @@ class ListAchievements:
                 button.update(SCREEN)
 
         pygame.draw.rect(SCREEN, BANNER_COLOR, pygame.Rect((0, 425), (640, 55)))
-        render_text(f"{self.selected_button_index+1}/{len(self.state.get_uploaded_achievements())}", (320, 450), FONT, TEXT_COLOR_LIGHT, centered=True)
+        render_text(f"{self.selected_button_index + 1}/{len(self.state.get_uploaded_achievements())}", (320, 450), FONT,
+                    TEXT_COLOR_LIGHT, centered=True)
 
         render_text("Use DPAD to navigate", (15, 435), FONT_SMALL, TEXT_COLOR_LIGHT)
         render_text("B to return", (15, 455), FONT_SMALL, TEXT_COLOR_LIGHT)
@@ -446,7 +460,7 @@ class ListAchievements:
 
 class GlobalState:
     def __init__(self):
-        self.current_state = "SCROLL_CHEEVOS" 
+        self.current_state = "SCROLL_CHEEVOS"
         self.cheevos_token = None
         self.key_states = {
             pygame.K_UP: False,
@@ -460,8 +474,8 @@ class GlobalState:
         self.unmatched_dict = {}
         self.game_dict_cache = {}
         self.debug_string = 'Logging in...'
-        self.username = None 
-        self.password = None 
+        self.username = None
+        self.password = None
 
         # API key. Use your own for fewer dropped network requests (can be found in 
         # retroachievements.org/controlpanel.php, look for 'Web API Key')
@@ -500,8 +514,8 @@ class GlobalState:
                             self.username = line.split('=')[1].strip()
             except:
                 self.print_error(['Could not find retroachievements username in',
-                    BATOCERA_CONF_LOCATION,
-                    'either add it to the config file or hardcode it at the top of this script.'])
+                                  BATOCERA_CONF_LOCATION,
+                                  'either add it to the config file or hardcode it at the top of this script.'])
         return self.username
 
     def get_password(self):
@@ -515,8 +529,8 @@ class GlobalState:
                             self.password = line.split('=')[1].strip()
             except:
                 self.print_error(['Could not find retroachievements password in',
-                    BATOCERA_CONF_LOCATION,
-                    'either add it to the config file or hardcode it at the top of this script.'])
+                                  BATOCERA_CONF_LOCATION,
+                                  'either add it to the config file or hardcode it at the top of this script.'])
         return self.password
 
     def get_badgenum_from_cid(self, cheevo_id):
@@ -570,7 +584,7 @@ class GlobalState:
                 entries = os.listdir(target_dir)
             except OSError as e:
                 self.print_error(['Error loading screenshot directory', target_dir, f'Error: {e}',
-                    'To use a different screenshot directory, change the location at the top of this file.'])
+                                  'To use a different screenshot directory, change the location at the top of this file.'])
                 return []
 
             for entry in entries:
@@ -604,8 +618,8 @@ class GlobalState:
 
     def send_unlock_request(self, cheevo_id):
         url = 'https://retroachievements.org/dorequest.php'
-        params = {'u': self.get_username(), 'r': 'awardachievement', 
-                'a': cheevo_id, 't': self.get_token(), 'h': 0}
+        params = {'u': self.get_username(), 'r': 'awardachievement',
+                  'a': cheevo_id, 't': self.get_token(), 'h': 0}
         mheaders = {'User-Agent': '1.2.0'}
         response = requests.get(url, headers=mheaders, params=params)
         print(response.text)
@@ -614,7 +628,7 @@ class GlobalState:
         if self.uploaded_achievements is None or force_reload:
             url = f'https://retroachievements.org/API/API_GetUserRecentAchievements.php'
             params = {'u': self.get_username(), 'z': self.api_username,
-                    'y': self.api_key, 'm': 10000000}
+                      'y': self.api_key, 'm': 10000000}
             response = requests.get(url, params=params)
             print(response.text)
             achievements = json.loads(response.text)
@@ -642,8 +656,8 @@ class GlobalState:
                     self.debug_string = f'Login error'
             except:
                 self.print_error(['Failed RetroAchievements login!', '',
-                    f'username | password used: {self.get_username()} | {self.get_password()}',
-                    'Check you credentials in batocera.conf, or enter them manually in this file.'])
+                                  f'username | password used: {self.get_username()} | {self.get_password()}',
+                                  'Check you credentials in batocera.conf, or enter them manually in this file.'])
                 self.debug_string = f'Login error'
         return self.cheevos_token
 
@@ -661,10 +675,11 @@ def main():
     state = GlobalState()
 
     render_startscreen(state)
-    # check if we can login
+    # check if we can log in
     print(state.get_token())
 
-    state.unmatched_achievements = [x for x in state.get_unlocked_achievements() if x not in state.get_uploaded_achievements()]
+    state.unmatched_achievements = [x for x in state.get_unlocked_achievements() if
+                                    x not in state.get_uploaded_achievements()]
 
     while True:
         SCREEN.fill(BACKGROUND_COLOR)
@@ -680,6 +695,7 @@ def main():
 
         pygame.display.update()
         CLOCK.tick(FPS)
+
 
 if __name__ == "__main__":
     main()
