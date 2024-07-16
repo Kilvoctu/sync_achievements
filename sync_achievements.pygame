@@ -28,6 +28,12 @@ SCREENSHOTS_DIRECTORY = "/userdata/screenshots/"
 # batocera.conf is ignored if the overrides above are used
 BATOCERA_CONF_LOCATION = '/userdata/system/batocera.conf'
 
+# API key. Use your own for fewer dropped network requests (can be found in
+# retroachievements.org/controlpanel.php, look for 'Web API Key')
+API_KEY = 'o9RmEVAVdegyNMJm5eHr3w1qWpao6xFW'
+# replace with your own username if using your own API key
+API_USERNAME = 'ijustneedanapikey'
+
 import pygame
 import pygame.freetype
 import sys
@@ -479,11 +485,8 @@ class GlobalState:
         self.username = None
         self.password = None
 
-        # API key. Use your own for fewer dropped network requests (can be found in 
-        # retroachievements.org/controlpanel.php, look for 'Web API Key')
-        self.api_key = 'o9RmEVAVdegyNMJm5eHr3w1qWpao6xFW'
-        # replace with your own username if using your own API key
-        self.api_username = 'ijustneedanapikey'
+        self.api_key = API_KEY
+        self.api_username = API_USERNAME
 
         self.states = {}
         self.states["ERROR"] = ErrorScreen(self)
@@ -514,7 +517,10 @@ class GlobalState:
                     for line in f:
                         if line.startswith('global.retroachievements.username'):
                             self.username = line.split('=')[1].strip()
-            except:
+                        if line.startswith('global.retroachievements.apikey'):
+                            self.api_username = self.username
+                            self.api_key = line.split('=')[1].strip()
+            except(Exception,):
                 self.print_error(['Could not find retroachievements username in',
                                   BATOCERA_CONF_LOCATION,
                                   'either add it to the config file or hardcode it at the top of this script.'])
@@ -562,7 +568,7 @@ class GlobalState:
         if os.path.exists(icon_path):
             try:
                 icon_cache[cheevo_id] = pygame.image.load(icon_path)
-            except:
+            except(Exception,):
                 os.remove(icon_path)
 
         if not os.path.exists(icon_path):
@@ -583,7 +589,7 @@ class GlobalState:
             target_extension = ".png"
 
             try:
-                entries = os.listdir(target_dir)
+                entries = os.path.abspath(target_dir)
             except OSError as e:
                 self.print_error(['Error loading screenshot directory', target_dir, f'Error: {e}',
                                   'To use a different screenshot directory, change the location at the top of this file.'])
