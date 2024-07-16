@@ -634,6 +634,10 @@ class GlobalState:
                           'y': self.api_key, 'm': 10000000}
                 response = requests.get(url, params=params)
                 print(response.text)
+                if 'Service Temporarily Unavailable' in response.text:
+                    self.print_error([f"RetroAchievements API seems to be down"])
+                    self.uploaded_achievements = []
+                    return self.uploaded_achievements
                 achievements = json.loads(response.text)
                 cheevo_ids = [x['AchievementID'] for x in achievements]
                 cheevo_dict = {}
@@ -641,8 +645,8 @@ class GlobalState:
                     cheevo_dict[cid] = achievements[i]
                 self.uploaded_achievements = cheevo_dict
             except Exception as e:
-                print(f"RetroAchievements API down\n{str(e)}")
-                self.uploaded_achievements = None
+                self.print_error([f"Error getting unlocked achievements", f"{str(e)}"])
+                self.uploaded_achievements = []
 
         return self.uploaded_achievements
 
