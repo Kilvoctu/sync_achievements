@@ -663,6 +663,10 @@ class GlobalState:
                     self.debug_string = f'Login successful'
                 else:
                     self.debug_string = f'Login error'
+            except requests.exceptions.RequestException:
+                self.print_error(['Failed RetroAchievements login!', '',
+                                  f'Please check that your device is connected to the internet.'])
+                self.debug_string = f'Network error'
             except(Exception,):
                 self.print_error(['Failed RetroAchievements login!', '',
                                   f'username | password used: {self.get_username()} | {self.get_password()}',
