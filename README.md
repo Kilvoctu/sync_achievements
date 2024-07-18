@@ -23,9 +23,9 @@ Replace `ENTER_CREDENTIALS_HERE` with your RetroAchievements username and passwo
 
 ## Hardcore mode
 
-Achievements are always submitted with Hardcore mode disabled. This is a feature, not a bug. The unlock requests work by repeating the unlock requests to the RetroAchievements server, but the unlock date/time is unfortunately tracked on the server-side. This means the unlocks trigger the moment the program runs, not the moment the screenshots were made (resulting in inplausibly quick unlocks, especially when syncing achievements from multiple different games). For Hardcore mode, this could result in your account getting banned. 
+By default, achievements are submitted with Hardcore mode disabled. The unlock requests work by repeating the unlock requests to the RetroAchievements server, but the unlock date/time is unfortunately tracked on the server-side. This means the unlocks trigger the moment the program runs, not the moment the screenshots were made (resulting in inplausibly quick unlocks, especially when syncing achievements from multiple different games). For Hardcore mode, this could result in your account getting banned. 
 
-If you like to live dangerously, you can edit the `send_unlock_request()` function to set `'h': 1` and send unlock requests with Hardcore mode enabled. However, the safer and strongly recommended option is to go through the official channels and request your Hardcore unlocks manually via the RetroAchievements Discord server.
+If you like to live dangerously, you can set the unlock requests to Hardcore mode from the main menu. However, the safer and strongly recommended option is to go through the official channels and request your Hardcore unlocks manually via the RetroAchievements Discord server.
 
 ## License
 
