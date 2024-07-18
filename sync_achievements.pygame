@@ -117,7 +117,9 @@ class Button:
         self.textpos = (self.pos[0] + self.iconwidth, self.pos[1] + self.iconwidth // 6)
         self.update_text()
 
-    def update_text(self):
+    def update_text(self, text=None):
+        if text is not None:
+            self.text = text
         self.rendered_lines = []
         self.render_rects = []
         for i, line in enumerate(self.text):
@@ -167,11 +169,64 @@ class ErrorScreen:
 class MainMenu:
     def __init__(self, state):
         self.state = state
-        self.start_button = Button(["Synchronize Achievements"], (320, 200),
+        self.start_button = Button(["Synchronize Achievements"], (320, 170),
                                    [FONT], TEXT_COLOR, TEXT_COLOR_ACTIVE, hover_bg_color=HOVER_BG_COLOR)
-        self.exit_button = Button(["Exit"], (320, 270),
+        self.hardcore_button = Button(["Enable Hardcore Mode"], (320, 240),
                                   [FONT], TEXT_COLOR, TEXT_COLOR_ACTIVE, hover_bg_color=HOVER_BG_COLOR)
-        self.selected_button = self.start_button
+        self.exit_button = Button(["Exit"], (320, 310),
+                                  [FONT], TEXT_COLOR, TEXT_COLOR_ACTIVE, hover_bg_color=HOVER_BG_COLOR)
+        self.buttons = [self.start_button,
+                        self.hardcore_button,
+                        self.exit_button]
+        self.selected_button_index = 0
+
+    def handle_events(self):
+        if self.state.hardcore:
+            self.hardcore_button.update_text(['Disable Hardcore Mode'])
+        else:
+            self.hardcore_button.update_text(['Enable Hardcore Mode'])
+        for event in pygame.event.get():
+            if event.type == pygame.QUIT:
+                pygame.quit()
+                sys.exit()
+            if event.type == pygame.KEYDOWN:
+                if event.key == pygame.K_DOWN:
+                    self.selected_button_index = min(len(self.buttons) - 1, self.selected_button_index + 1)
+                elif event.key == pygame.K_UP:
+                    self.selected_button_index = max(0, self.selected_button_index - 1)
+                elif event.key in [pygame.K_RETURN, pygame.K_a]:
+                    if self.buttons[self.selected_button_index] == self.start_button:
+                        print(f'successfully uploaded achievements:')
+                        print(self.state.get_uploaded_achievements(force_reload=True))
+                        self.state.unmatched_achievements = [x for x in self.state.get_unlocked_achievements() if
+                                                             x not in self.state.get_uploaded_achievements()]
+                        self.state.current_state = "SYNC_CHEEVOS"
+                        return
+                    elif self.buttons[self.selected_button_index] == self.hardcore_button:
+                        if self.state.hardcore:
+                            self.state.hardcore = False
+                        else:
+                            self.state.current_state = "WARN_HARDCORE"
+                    elif self.buttons[self.selected_button_index] == self.exit_button:
+                        pygame.quit()
+                        sys.exit()
+
+    def render(self):
+        for i in range(len(self.buttons)):
+            self.buttons[i].set_hovering(self.selected_button_index == i)
+            self.buttons[i].update(SCREEN)
+
+        pygame.draw.rect(SCREEN, BANNER_COLOR, pygame.Rect((0, 425), (640, 55)))
+        render_text("Use DPAD to navigate", (15, 435), FONT_SMALL, TEXT_COLOR_LIGHT)
+        render_text("A to select", (15, 455), FONT_SMALL, TEXT_COLOR_LIGHT)
+
+
+class WarnHardcore:
+    def __init__(self, state):
+        self.state = state
+        self.yes_button = Button(["I understand, enable Hardcore sync"], (320, 320),
+                                   [FONT], TEXT_COLOR, TEXT_COLOR_ACTIVE, hover_bg_color=HOVER_BG_COLOR)
+        self.selected_button = self.yes_button
 
     def handle_events(self):
         for event in pygame.event.get():
@@ -179,28 +234,27 @@ class MainMenu:
                 pygame.quit()
                 sys.exit()
             if event.type == pygame.KEYDOWN:
-                if event.key == pygame.K_UP:
-                    self.selected_button = self.start_button
-                elif event.key == pygame.K_DOWN:
-                    self.selected_button = self.exit_button
-                elif event.key in [pygame.K_RETURN, pygame.K_a]:
-                    if self.selected_button == self.start_button:
-                        print(f'successfully uploaded achievements:')
-                        print(self.state.get_uploaded_achievements(force_reload=True))
-                        self.state.unmatched_achievements = [x for x in self.state.get_unlocked_achievements() if
-                                                             x not in self.state.get_uploaded_achievements()]
-                        self.state.current_state = "SYNC_CHEEVOS"
-                        return
-                    elif self.selected_button == self.exit_button:
-                        pygame.quit()
-                        sys.exit()
+                if event.key in [pygame.K_RETURN, pygame.K_a]:
+                    self.state.hardcore = True
+                    self.state.current_state = "MAIN_MENU"
 
     def render(self):
-        self.start_button.set_hovering(self.selected_button == self.start_button)
-        self.exit_button.set_hovering(self.selected_button == self.exit_button)
+        pygame.draw.rect(SCREEN, BANNER_COLOR, pygame.Rect((0, 0), (640, 50)))
+        render_text('WARNING', (10, 10), FONT, TEXT_COLOR_LIGHT)
 
-        self.start_button.update(SCREEN)
-        self.exit_button.update(SCREEN)
+        render_text('Synchronizing multiple achievements in quick succession with Hardcore mode',
+                    (320, 115), FONT_SMALL, TEXT_COLOR, centered=True)
+        render_text('can be detected as cheating, possibly resulting in an account ban.',
+                    (320, 130), FONT_SMALL, TEXT_COLOR, centered=True)
+        render_text('Avoid selecting achievements from multiple games to synchronize in one session',
+                    (320, 175), FONT_SMALL, TEXT_COLOR, centered=True)
+        render_text('and only synchronize achievements you (could) have unlocked in quick succession.',
+                    (320, 190), FONT_SMALL, TEXT_COLOR, centered=True)
+        render_text('If you want to be totally safe, request manual unlocks on the RetroAchievements Discord.',
+                    (320, 235), FONT_SMALL, TEXT_COLOR, centered=True)
+
+        self.yes_button.set_hovering(self.selected_button == self.yes_button)
+        self.yes_button.update(SCREEN)
 
         pygame.draw.rect(SCREEN, BANNER_COLOR, pygame.Rect((0, 425), (640, 55)))
         render_text("Use DPAD to navigate", (15, 435), FONT_SMALL, TEXT_COLOR_LIGHT)
@@ -462,12 +516,8 @@ class ListAchievements:
 
 class GlobalState:
     def __init__(self):
-        self.current_state = "SCROLL_CHEEVOS"
+        self.current_state = "MAIN_MENU"
         self.cheevos_token = None
-        self.key_states = {
-            pygame.K_UP: False,
-            pygame.K_DOWN: False
-        }
         self.icon_cache = {}
         self.icon_cache_locked = {}
         self.newly_unlocked = []
@@ -478,6 +528,7 @@ class GlobalState:
         self.debug_string = 'Logging in...'
         self.username = None
         self.password = None
+        self.hardcore = False
 
         # API key. Use your own for fewer dropped network requests (can be found in 
         # retroachievements.org/controlpanel.php, look for 'Web API Key')
@@ -487,6 +538,7 @@ class GlobalState:
 
         self.states = {}
         self.states["ERROR"] = ErrorScreen(self)
+        self.states["WARN_HARDCORE"] = WarnHardcore(self)
         self.states["MAIN_MENU"] = MainMenu(self)
         self.states["SCROLL_CHEEVOS"] = ScrollCheevos(self)
         self.states["SYNC_CHEEVOS"] = SyncAchievements(self)
@@ -620,8 +672,9 @@ class GlobalState:
 
     def send_unlock_request(self, cheevo_id):
         url = 'https://retroachievements.org/dorequest.php'
+        hardcore = 1 if self.hardcore else 0
         params = {'u': self.get_username(), 'r': 'awardachievement',
-                  'a': cheevo_id, 't': self.get_token(), 'h': 0}
+                  'a': cheevo_id, 't': self.get_token(), 'h': hardcore}
         mheaders = {'User-Agent': '1.2.0'}
         response = requests.get(url, headers=mheaders, params=params)
         print(response.text)
@@ -706,6 +759,17 @@ def main():
                 rendered_text = FONT_SMALL.render(state.debug_string, True, TEXT_COLOR_LIGHT)
                 rect = rendered_text.get_rect(topright=(625, 455))
                 SCREEN.blit(rendered_text, rect)
+            if 'success' in state.debug_string:
+                if state.hardcore:
+                    rendered_text = FONT_SMALL.render('!! Hardcore mode enabled !!', True, (255,100,100))
+                    rect = rendered_text.get_rect(topright=(625, 435))
+                    SCREEN.blit(rendered_text, rect)
+                else:
+                    rendered_text = FONT_SMALL.render('Hardcore mode disabled', True, TEXT_COLOR_LIGHT)
+                    rect = rendered_text.get_rect(topright=(625, 435))
+                    SCREEN.blit(rendered_text, rect)
+
+
 
         pygame.display.update()
         CLOCK.tick(FPS)
