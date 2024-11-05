@@ -25,6 +25,8 @@ USERNAME_OVERRIDE = 'ENTER_CREDENTIALS_HERE'
 PASSWORD_OVERRIDE = 'ENTER_CREDENTIALS_HERE'
 
 SCREENSHOTS_DIRECTORY = "/userdata/screenshots/"
+# synced screenshots will be moved here
+SYNCED_SCREENSHOTS_DIRECTORY = f"{SCREENSHOTS_DIRECTORY}synced"
 # batocera.conf is ignored if the overrides above are used
 BATOCERA_CONF_LOCATION = '/userdata/system/batocera.conf'
 
@@ -203,7 +205,7 @@ class MainMenu:
                 elif event.key in [pygame.K_RETURN, pygame.K_a]:
                     if self.buttons[self.selected_button_index] == self.start_button:
                         print(f'successfully uploaded achievements:')
-                        print(self.state.get_uploaded_achievements(force_reload=True))
+                        # print(self.state.get_uploaded_achievements(force_reload=True))
                         self.state.unmatched_achievements = [x for x in self.state.get_unlocked_achievements() if
                                                              x not in self.state.get_uploaded_achievements()]
                         self.state.current_state = "SYNC_CHEEVOS"
@@ -520,6 +522,26 @@ class ListAchievements:
         render_text("B to return", (15, 455), FONT_SMALL, TEXT_COLOR_LIGHT)
 
 
+def move_screenshot(achievement_id):
+    def add_trailing_slash(directory):
+        if not directory.endswith('/'):
+            directory += '/'
+        return directory
+    source_dir = add_trailing_slash(SCREENSHOTS_DIRECTORY)
+    target_dir = add_trailing_slash(SYNCED_SCREENSHOTS_DIRECTORY)
+    entries = os.listdir(source_dir)
+    if not os.path.exists(target_dir):
+        os.makedirs(target_dir)
+
+    target_string = f'cheevo-{achievement_id}.png'
+    for entry in entries:
+        if target_string in entry:
+            os.replace(f'{source_dir}{entry}', f'{target_dir}{entry}')
+            print(f'Synced ID: {achievement_id}. Moved screenshot to {target_dir}.')
+            break
+
+
+
 class GlobalState:
     def __init__(self):
         self.current_state = "MAIN_MENU"
@@ -641,7 +663,7 @@ class GlobalState:
             target_extension = ".png"
 
             try:
-                entries = os.path.abspath(target_dir)
+                entries = os.listdir(target_dir)
             except OSError as e:
                 self.print_error(['Error loading screenshot directory', target_dir, f'Error: {e}',
                                   'To use a different screenshot directory, change the location at the top of this file.'])
@@ -653,7 +675,7 @@ class GlobalState:
                     end_index = entry.index(target_extension)
                     cheevo_number = int(entry[start_index:end_index])
                     self.unlocked_achievements.append(cheevo_number)
-                    print(cheevo_number)
+                    # print(cheevo_number)
 
         return self.unlocked_achievements
 
@@ -662,7 +684,7 @@ class GlobalState:
             url = f'https://retroachievements.org/API/API_GetGameExtended.php'
             params = {'z': self.api_username, 'i': game_id, 'y': self.api_key}
             response = requests.get(url, params=params)
-            print(response.text)
+            # print(response.text)
             game_dict = json.loads(response.text)
             self.game_dict_cache[game_id] = game_dict
 
@@ -673,7 +695,7 @@ class GlobalState:
         params = {'z': self.api_username, 'c': 0, 'a': cheevo_id, 'y': self.api_key}
         response = requests.get(url, params=params)
         achievement = json.loads(response.text)
-        print(response.text)
+        # print(response.text)
         return achievement
 
     def send_unlock_request(self, cheevo_id):
@@ -684,24 +706,37 @@ class GlobalState:
         mheaders = {'User-Agent': '1.2.0'}
         response = requests.get(url, headers=mheaders, params=params)
         print(response.text)
+        move_screenshot(cheevo_id)
 
     def get_uploaded_achievements(self, force_reload=False):
         if self.uploaded_achievements is None or force_reload:
-            try:
-                url = f'https://retroachievements.org/API/API_GetUserRecentAchievements.php'
+
+            url = f'https://retroachievements.org/API/API_GetUserRecentAchievements.php'
+
+            def get_achievements(min):
                 params = {'u': self.get_username(), 'z': self.api_username,
-                          'y': self.api_key, 'm': 10000000}
+                          'y': self.api_key, 'm': min}
                 response = requests.get(url, params=params)
-                print(response.text)
-                if 'Service Temporarily Unavailable' in response.text:
+                result = json.loads(response.text)
+                # print(response.text)
+                return result
+            try:
+                minutes = 1008000
+                print(f'Searching achievements from past {int(minutes / 1440)} days')
+                achievements = get_achievements(minutes)
+                if 'Service Temporarily Unavailable' in achievements:
                     self.print_error([f"RetroAchievements API seems to be down"])
                     self.uploaded_achievements = []
                     return self.uploaded_achievements
-                achievements = json.loads(response.text)
+                while len(achievements) >= 500:
+                    minutes = minutes / 10
+                    print(f'Too many results (500). Reducing search window to past {int(minutes/1440)} days')
+                    achievements = get_achievements(minutes)
+                print(f'Fetched {len(achievements)} most recent achievements')
                 cheevo_ids = [x['AchievementID'] for x in achievements]
-                cheevo_dict = {}
+                cheevo_dict = []
                 for i, cid in enumerate(cheevo_ids):
-                    cheevo_dict[cid] = achievements[i]
+                    cheevo_dict.append(cid)
                 self.uploaded_achievements = cheevo_dict
             except Exception as e:
                 self.print_error([f"Error getting unlocked achievements", f"{str(e)}"])
@@ -717,7 +752,7 @@ class GlobalState:
                 mheaders = {'User-Agent': '1.2.0'}
                 response = requests.post(url, headers=mheaders, json=params)
                 login = json.loads(response.text)
-                print(response.text)
+                # print(response.text)
                 self.cheevos_token = login["Token"]
                 if login["Success"]:
                     self.debug_string = f'Login successful'
@@ -749,10 +784,14 @@ def main():
 
     render_startscreen(state)
     # check if we can log in
-    print(state.get_token())
+    # print(f'Token: {state.get_token()}')
 
     state.unmatched_achievements = [x for x in state.get_unlocked_achievements() if
                                     x not in state.get_uploaded_achievements()]
+
+    matched_achievements = [y for y in state.get_unlocked_achievements() if y in state.get_uploaded_achievements()]
+    for entry in matched_achievements:
+        move_screenshot(entry)
 
     while True:
         SCREEN.fill(BACKGROUND_COLOR)
